@@ -28,10 +28,14 @@ h1{font-weight:650;line-height:1.03;letter-spacing:-.048em}h1 em{font-weight:600
 @media (max-width:700px){.blackbox-visual{grid-template-columns:1fr 18px 112px 18px 1fr}.blackbox__frame{height:145px}.blackbox__logo{width:104px;height:104px;background-size:138px 138px}.brand__mark{width:36px;height:36px;background-size:48px 48px}.brand__name{font-size:19px}h1 em{font-weight:450}.floating-whatsapp{padding:11px 14px}}
 :root{--container:1284px}
 
+/* Mantém as seções visíveis abaixo do cabeçalho fixo ao usar o menu. */
+[id]{scroll-margin-top:100px}
+.final-cta .button+.button{margin-left:10px}
+
 /* Logos oficiais — sempre exibidas por inteiro, sem recorte */
 .brand__image{display:block;width:166px;height:66px;object-fit:contain}
 .brand--compact .brand__image{width:128px;height:52px}
 .blackbox__logo{position:relative;z-index:1;display:block;width:286px;height:252px;object-fit:contain;background:none;filter:drop-shadow(0 0 18px rgba(75,210,255,.26))}
 .club__logo{position:relative;z-index:1;display:block;width:230px;height:230px;object-fit:contain;background:none}
 @media (max-width:1000px){.brand__image{width:140px;height:56px}.blackbox__logo{width:210px;height:205px}}
-@media (max-width:700px){.brand__image{width:126px;height:50px}.blackbox__logo{width:108px;height:128px}.club__logo{width:185px;height:185px}}
+@media (max-width:700px){.brand__image{width:126px;height:50px}.blackbox__logo{width:108px;height:128px}.club__logo{width:185px;height:185px}.final-cta .button{display:flex;width:100%;max-width:360px;margin-inline:auto}.final-cta .button+.button{margin:12px auto 0}}

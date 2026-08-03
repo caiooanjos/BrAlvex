@@ -5,18 +5,22 @@ document.querySelectorAll("[data-sponsor]").forEach((link) => link.href = `https
 
 const toggle = document.querySelector(".menu-toggle");
 const nav = document.querySelector("#main-nav");
-toggle.addEventListener("click", () => {
-  const open = toggle.getAttribute("aria-expanded") === "true";
-  toggle.setAttribute("aria-expanded", String(!open));
-  nav.classList.toggle("is-open", !open);
-});
-nav.querySelectorAll("a").forEach((link) => link.addEventListener("click", () => {
-  toggle.setAttribute("aria-expanded", "false");
-  nav.classList.remove("is-open");
-}));
+if (toggle && nav) {
+  toggle.addEventListener("click", () => {
+    const open = toggle.getAttribute("aria-expanded") === "true";
+    toggle.setAttribute("aria-expanded", String(!open));
+    nav.classList.toggle("is-open", !open);
+  });
+  nav.querySelectorAll("a").forEach((link) => link.addEventListener("click", () => {
+    toggle.setAttribute("aria-expanded", "false");
+    nav.classList.remove("is-open");
+  }));
+}
 
 const header = document.querySelector(".header");
-window.addEventListener("scroll", () => header.classList.toggle("is-scrolled", scrollY > 24), { passive: true });
+if (header) {
+  window.addEventListener("scroll", () => header.classList.toggle("is-scrolled", scrollY > 24), { passive: true });
+}
 
 const observer = new IntersectionObserver((entries) => entries.forEach((entry) => {
   if (entry.isIntersecting) {
