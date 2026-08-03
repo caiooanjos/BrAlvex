@@ -1,0 +1,33 @@
+/* Correções locais aplicadas sobre o design original. */
+[id] {
+  scroll-margin-top: 110px;
+}
+
+.final-cta .button + .button {
+  margin-left: 10px;
+}
+
+.footer > a:not(.brand) {
+  color: var(--cyan);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .footer > a:not(.brand) {
+    width: fit-content;
+  }
+}
+
+@media (max-width: 620px) {
+  .final-cta .button {
+    display: flex;
+    width: 100%;
+    max-width: 380px;
+    margin-inline: auto;
+  }
+
+  .final-cta .button + .button {
+    margin: 12px auto 0;
+  }
+}
