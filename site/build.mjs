@@ -30,6 +30,8 @@ export async function build({ quiet = false } = {}) {
   for (const file of ["fonts.css", "fixes.css", "site.css", "main.js", "trial-form.js", "js-flag.js", "root-redirect.js"]) {
     await cp(join(root, "src", file), join(dist, "src", file));
   }
+  // Bloqueia listagem de pastas se dist/ for servido direto por Apache/LiteSpeed.
+  await cp(join(root, "site", "htaccess"), join(dist, ".htaccess"));
 
   for (const c of langs) {
     await write(c.routes.home, renderHome(c, langs, siteUrl));

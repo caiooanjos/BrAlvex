@@ -90,3 +90,9 @@ test("raiz antiga redireciona preservando a âncora", async () => {
   const script = await read("src/root-redirect.js");
   assert.match(script, /location\.hash/);
 });
+
+test("dist/ bloqueia listagem de pastas quando servido por Apache/LiteSpeed", async () => {
+  const htaccess = await read(".htaccess");
+  assert.match(htaccess, /Options -Indexes/);
+  assert.match(htaccess, /Require all denied/);
+});

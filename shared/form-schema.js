@@ -2,7 +2,7 @@
 // Arquivo isomórfico: usado pelo navegador (validação de conveniência) e pelo servidor (validação obrigatória).
 
 export const FORM_VERSION = "trial-2026-10-v1";
-export const PRIVACY_NOTICE_VERSION = "privacy-notice-2026-10-draft";
+export const PRIVACY_NOTICE_VERSION = "privacy-notice-2026-10-v1";
 export const MARKETING_TEXT_VERSION = "marketing-optin-2026-10-v1";
 
 export const OPTIONS = {

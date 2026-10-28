@@ -9,7 +9,8 @@
   "scripts": {
     "build": "node site/build.mjs",
     "start": "node --env-file-if-exists=.env server/index.js",
-    "dev": "node site/build.mjs && node --env-file-if-exists=.env --watch-path=server server/index.js",
+    "dev": "node scripts/dev-local.mjs",
+    "dev:mysql": "node site/build.mjs && node --env-file-if-exists=.env --watch-path=server server/index.js",
     "migrate": "node --env-file-if-exists=.env server/migrate.js",
     "admin:create": "node --env-file-if-exists=.env server/cli/admin.js create",
     "admin:reset-password": "node --env-file-if-exists=.env server/cli/admin.js reset-password",

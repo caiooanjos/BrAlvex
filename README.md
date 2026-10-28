@@ -27,13 +27,20 @@ Site institucional bilíngue (português e inglês) com formulário de solicita�
 
 ```bash
 npm install
-cp .env.example .env     # preencher DB_* e segredos; NODE_ENV=development e SITE_URL=http://localhost:3000
-npm run migrate
-npm run admin:create -- voce@exemplo.com
-npm run dev              # gera dist/ e sobe o servidor
+npm run dev
 ```
 
-Os textos ficam em `site/content/*.js`. Depois de editar, rode `npm run build`.
+O `npm run dev` não precisa de `.env` nem de MySQL instalado. Ele:
+
+- gera o site;
+- sobe um MySQL temporário, apagado ao encerrar com Ctrl+C;
+- mostra os endereços do site e do painel e um login temporário.
+
+Use sempre esse comando para ver o site no computador. O Live Server do VS Code está configurado para abrir `dist/`, mas nele o formulário e o painel não funcionam.
+
+Para rodar com um MySQL próprio, configure o `.env` (a partir do `.env.example`) e use `npm run migrate`, `npm run admin:create -- voce@exemplo.com` e `npm run dev:mysql`.
+
+Os textos ficam em `site/content/*.js`. Depois de editar, reinicie o `npm run dev` ou rode `npm run build`.
 
 ## Testes
 
@@ -43,4 +50,4 @@ npm test
 
 Os testes de integração baixam e executam um MySQL real temporário (`mysql-memory-server`, cerca de 45 s na primeira vez) e verificam gravação, validação, limites, painel, sessões, CSRF e CSV.
 
-Publicação, backups e restauração estão em [docs/DEPLOY.md](docs/DEPLOY.md). Administradores, em [docs/ADMIN.md](docs/ADMIN.md). O que ainda depende da BrAlveX, em [docs/PENDENCIAS.md](docs/PENDENCIAS.md).
+**Instalação na Hostinger, passo a passo: [docs/HOSTINGER.md](docs/HOSTINGER.md).** Arquitetura, backups e restauração em geral: [docs/DEPLOY.md](docs/DEPLOY.md). Administradores, em [docs/ADMIN.md](docs/ADMIN.md). O que ainda depende da BrAlveX, em [docs/PENDENCIAS.md](docs/PENDENCIAS.md).

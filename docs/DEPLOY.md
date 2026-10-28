@@ -21,7 +21,7 @@ O navegador nunca acessa o banco. Somente o processo Node conecta ao MySQL, com 
 | HTTPS | Certificado válido; a aplicação aplica HSTS em produção |
 | E-mail (opcional) | SMTP para o aviso de novas solicitações |
 
-**Hospedagem só de arquivos estáticos não atende.** Ela consegue servir `dist/`, mas sem o back end o formulário não funciona. Nesse caso, a menor adaptação é manter o site estático onde está e publicar apenas este servidor Node num plano que suporte Node.js + MySQL (por exemplo, os planos da Hostinger com Node.js, ou uma VPS), apontando o domínio para ele. Nenhum serviço foi contratado.
+Na Hostinger, siga [HOSTINGER.md](HOSTINGER.md). **Hospedagem só de arquivos estáticos não atende.** Ela consegue servir `dist/`, mas sem o back end o formulário não funciona. Nesse caso, a menor adaptação é manter o site estático onde está e publicar apenas este servidor Node num plano que suporte Node.js + MySQL (por exemplo, os planos da Hostinger com Node.js, ou uma VPS), apontando o domínio para ele. Nenhum serviço foi contratado.
 
 ## Primeira publicação
 

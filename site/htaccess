@@ -1,0 +1,13 @@
+# Proteção para quando dist/ for servido diretamente por Apache/LiteSpeed (ex.: hospedagem só estática).
+# Com o servidor Node, este arquivo não é usado nem servido.
+Options -Indexes
+DirectoryIndex index.html
+ErrorDocument 403 /pt/
+ErrorDocument 404 /pt/
+
+<FilesMatch "^\.">
+  Require all denied
+</FilesMatch>
+<FilesMatch "\.(env|sql|gz|zip|log|md|mjs|json|lock|ini|sh)$">
+  Require all denied
+</FilesMatch>

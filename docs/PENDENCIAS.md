@@ -1,25 +1,21 @@
-# Pendências antes da produção
+# Pendências
 
-Itens que dependem de decisão ou acesso da BrAlveX. Nada aqui foi inventado ou presumido no código.
+O site está pronto para uso. A Política de Privacidade está publicada em versão formal, com contato por e-mail e WhatsApp e sem dados societários. Os itens abaixo são melhorias ou passos de instalação, não bloqueios.
 
-## Jurídico / privacidade
+## Instalação (veja `docs/HOSTINGER.md`)
 
-- [ ] **Controlador dos dados**: razão social, CNPJ e endereço, que aparecem como `[PENDENTE]` em `site/content/pt.js` e `[PENDING]` em `site/content/en.js`.
-- [ ] **Base legal** de cada finalidade (avaliação da solicitação; novidades por e-mail).
-- [ ] **Prazo de retenção** das solicitações. Depois de definido, preencher `LEAD_RETENTION_DAYS`, agendar `npm run retention -- --apply` e atualizar a política.
-- [ ] **Operadores**: provedores de hospedagem e e-mail que processam os dados.
-- [ ] Revisão jurídica do aviso do formulário e da política. Ao alterar o texto do aviso, atualizar `PRIVACY_NOTICE_VERSION` em `shared/form-schema.js`, para que cada lead registre a versão vista.
-- [ ] A política hoje traz a faixa "versão preliminar em revisão". Remover depois da aprovação.
+- [ ] Confirmar que o plano da Hostinger é Business ou Cloud (com **Node.js web app**).
+- [ ] Criar o banco, o app Node.js e as variáveis de ambiente, com segredos novos.
+- [ ] Rodar as migrations e criar o primeiro administrador (acesso remoto temporário ao MySQL).
+- [ ] Conferir o domínio e o SSL.
+- [ ] **E-mail**: criar ou confirmar a caixa `contact@bralvex.com` e configurar o SMTP para o aviso de novos leads. Sem isso, os leads ficam no painel, mas sem aviso.
+- [ ] Conferir os backups automáticos do plano.
 
-## Infraestrutura
+## Opcional / quando a BrAlveX quiser
 
-- [ ] Confirmar se o plano de hospedagem executa **Node.js ≥ 24.22.1** e oferece **MySQL 8+ ou MariaDB 10.6+** (veja `docs/DEPLOY.md`). Hoje `bralvex.com` responde 404 na CDN da Hostinger, e o DNS está na Locaweb.
-- [ ] Criar o banco e os usuários (`docs/database-setup.sql`), além do `.env` de produção com segredos novos.
-- [ ] Backups automáticos do banco e teste de restauração.
-- [ ] **E-mail**: `contact@bralvex.com` foi usado como endereço público. A troca não cria a caixa postal. Confirmar que a caixa existe (o MX aponta para a Hostinger) e, para o aviso de novos leads, informar as credenciais SMTP (`SMTP_*`, `NOTIFY_FROM`). Sem isso, o aviso fica registrado como "não enviado".
+- [ ] Incluir razão social, CNPJ e endereço na Política de Privacidade (`site/content/pt.js` e `en.js`, seção "Responsável pelo tratamento"). Ao alterar o texto, atualizar `PRIVACY_NOTICE_VERSION` em `shared/form-schema.js`.
+- [ ] Revisão jurídica da Política.
+- [ ] Definir um prazo fixo de retenção. Se definido, preencher `LEAD_RETENTION_DAYS`, executar `npm run retention -- --apply` periodicamente e citar o prazo na Política.
 - [ ] MFA do painel (opções em `docs/ADMIN.md`).
-
-## Conteúdo
-
-- [ ] Arquivos de fonte Geist: `original-assets/fonts/` está vazio no repositório e no `BrAlveX-site.zip`. O site usa a fonte reserva (Inter/Arial), e cada página gera um 404 de fonte. Se a fonte for desejada, adicionar os `.woff2` (licença OFL) nesse diretório.
-- [ ] Revisão nativa do texto em inglês por alguém da BrAlveX.
+- [ ] Fontes Geist: `original-assets/fonts/` está vazio desde o projeto original. O site usa a fonte reserva. Para usar a Geist, adicionar os `.woff2` (licença OFL) nessa pasta.
+- [ ] Revisão nativa do texto em inglês.

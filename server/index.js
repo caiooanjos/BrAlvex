@@ -10,6 +10,7 @@ try {
 } catch (err) {
   if (err instanceof ConfigError) {
     console.error(`Configuração inválida: ${err.message}`);
+    if (process.env.NODE_ENV !== "production") console.error("Para rodar localmente sem configurar banco, use: npm run dev");
     process.exit(1);
   }
   throw err;
@@ -19,7 +20,7 @@ const pool = createPool(config.db);
 const app = createApp({ config, pool, log });
 
 const server = app.listen(config.port, config.host, () => {
-  log.info("server.started", { host: config.host, port: config.port, production: config.production });
+  log.info("server.started", { node: process.version, host: config.host, port: config.port, production: config.production });
 });
 server.requestTimeout = 15000;
 server.headersTimeout = 10000;

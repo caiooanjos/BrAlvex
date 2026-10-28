@@ -465,10 +465,10 @@ export function renderPrivacy(c, langs, siteUrl, date) {
       <section class="section legal" id="inicio">
         <div class="container legal__body">
           <h1>${esc(p.heading)}</h1>
-          <p class="legal__draft" role="note">${esc(p.draft)}</p>
+          ${p.draft ? `<p class="legal__draft" role="note">${esc(p.draft)}</p>` : ""}
           ${p.sections
-            // Os textos das seções vêm do repositório (não de usuários); permitem <strong> para marcar pendências.
-            .map(([title, body]) => `<h2>${esc(title)}</h2><p>${fill(body, { email: emailLink })}</p>`)
+            // Os textos das seções vêm do repositório (não de usuários); permitem HTML simples.
+            .map(([title, body]) => `<h2>${esc(title)}</h2><p>${fill(body, { email: emailLink, whatsapp: external(c, whatsappHref(c.whatsapp.general), WHATSAPP_DISPLAY) })}</p>`)
             .join("\n          ")}
           <p class="legal__updated">${esc(fill(p.updated, { date }))}</p>
         </div>

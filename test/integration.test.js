@@ -186,6 +186,20 @@ describe("site público", () => {
     assert.match(body, /name="form_token" value="\d+\.[\w-]+\.[\w-]+"/);
     assert.equal((await fetch(`${base}/shared/form-schema.js`)).status, 200);
   });
+
+  test("não lista pastas nem expõe código, configuração ou banco", async () => {
+    const { base } = await start();
+    const paths = [
+      "/assets/", "/src/", "/shared/", "/server/", "/server/config.js", "/migrations/001_initial.sql",
+      "/.env", "/.env.example", "/.htaccess", "/package.json", "/node_modules/", "/dist/", "/docs/", "/.git/config",
+    ];
+    for (const path of paths) {
+      const res = await fetch(base + path);
+      const body = await res.text();
+      assert.notEqual(res.status, 200, path);
+      assert.doesNotMatch(body, /Index of|DB_PASSWORD|CREATE TABLE/i, path);
+    }
+  });
 });
 
 describe("envio do formulário", () => {
