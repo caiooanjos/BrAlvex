@@ -493,6 +493,11 @@ export function renderNoJsErrors(c, langs, siteUrl, messages) {
   return page(c, langs, "trial", { title: t.title, description: t.description, siteUrl, indexable: false }, main);
 }
 
+export function renderNotFound() {
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Página não encontrada | BrAlveX</title><link rel="stylesheet" href="/original-assets/index-BwCoKsv6.css"><link rel="stylesheet" href="/src/site.css"></head><body><main class="section legal"><div class="container legal__body"><h1>Página não encontrada</h1><p><a href="/pt/">Ir para o site em português</a></p><p lang="en"><a href="/en/">Page not found — go to the English website</a></p></div></main></body></html>
+`;
+}
+
 export function rootRedirect(target) {
   // Fallback para hospedagem estática sem redirecionamento no servidor: preserva o #âncora dos links antigos.
   return `<!DOCTYPE html>

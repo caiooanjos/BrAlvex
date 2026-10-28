@@ -4,30 +4,17 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=24.22.1"
+    "node": ">=22.12"
   },
   "scripts": {
     "build": "node site/build.mjs",
-    "start": "node --env-file-if-exists=.env server/index.js",
     "dev": "node scripts/dev-local.mjs",
-    "dev:mysql": "node site/build.mjs && node --env-file-if-exists=.env --watch-path=server server/index.js",
-    "migrate": "node --env-file-if-exists=.env server/migrate.js",
-    "admin:create": "node --env-file-if-exists=.env server/cli/admin.js create",
-    "admin:reset-password": "node --env-file-if-exists=.env server/cli/admin.js reset-password",
-    "admin:deactivate": "node --env-file-if-exists=.env server/cli/admin.js deactivate",
-    "retention": "node --env-file-if-exists=.env server/cli/retention.js",
-    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\""
-  },
-  "dependencies": {
-    "@node-rs/argon2": "^2.2.2",
-    "express": "^5.3.0",
-    "express-rate-limit": "^8.7.1",
-    "express-session": "^1.19.0",
-    "helmet": "^8.3.0",
-    "mysql2": "^3.24.6",
-    "nodemailer": "^10.2.1"
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
+    "hostinger": "node scripts/package-hostinger.mjs"
   },
   "devDependencies": {
-    "mysql-memory-server": "^1.18.0"
-  }
+    "mysql-memory-server": "^1.18.0",
+    "mysql2": "^3.24.6"
+  },
+  "description": "Site BrAlveX: páginas estáticas bilíngues + back end PHP/MySQL (formulário e painel). Node é usado só para gerar, testar e empacotar."
 }

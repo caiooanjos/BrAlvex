@@ -1,81 +1,82 @@
-# Publicação, operação e backups
+# Arquitetura, operação e backups
+
+Na Hostinger (plano Premium), siga o passo a passo em [HOSTINGER.md](HOSTINGER.md). Este documento descreve como o sistema funciona e como operar em qualquer hospedagem PHP + MySQL.
 
 ## Arquitetura
 
 ```
-Navegador ──HTTPS──> Node.js (Express 5) ──127.0.0.1──> MySQL/MariaDB
-                      ├─ site estático gerado em dist/ (/pt, /en)
-                      ├─ POST /api/leads  (valida, grava e responde)
-                      └─ /admin/*         (painel autenticado)
+Navegador ──HTTPS──> Apache/LiteSpeed (public_html)
+                      ├─ páginas estáticas (/pt, /en, CSS, JS, imagens)  → entregues direto
+                      └─ /api/*, /admin/*, páginas do formulário        → app.php (PHP 8.1+)
+                                                                            └─ bralvex-app/ (fora da pasta pública)
+                                                                                 └─ MySQL/MariaDB em 127.0.0.1
 ```
 
-O navegador nunca acessa o banco. Somente o processo Node conecta ao MySQL, com um usuário restrito a `SELECT/INSERT/UPDATE/DELETE`.
+- O navegador nunca acessa o banco. Só o PHP conecta, com consultas parametrizadas (PDO, sem emulação).
+- **`public_html/.htaccess`:**
+  - bloqueia a listagem de pastas, arquivos ocultos e o acesso direto a scripts;
+  - força HTTPS e aplica os cabeçalhos de segurança;
+  - encaminha as rotas dinâmicas para `app.php`.
+- **`bralvex-app/`:** guarda o código, a configuração (`config.php`), as migrations e os logs (`storage/`). Fica fora de `public_html` e ainda tem um `.htaccess` com `Require all denied`, por segurança.
+- **`php/dev-router.php`:** reproduz as regras do `.htaccess` no servidor local e nos testes.
 
 ## Requisitos da hospedagem
 
 | Recurso | Necessário |
 | --- | --- |
-| Runtime | Node.js **24.22.1 ou superior** (LTS com as correções de segurança de 20/10/2026) |
-| Banco | MySQL 8.0+ ou MariaDB 10.6+, no mesmo servidor ou em rede privada |
-| Processo | Aplicação Node persistente (não serverless), com variáveis de ambiente privadas |
-| HTTPS | Certificado válido; a aplicação aplica HSTS em produção |
-| E-mail (opcional) | SMTP para o aviso de novas solicitações |
+| PHP | 8.1 ou superior (recomendado 8.3), com `pdo_mysql`, `mbstring` e `openssl` (padrão na Hostinger) |
+| Banco | MySQL 8.0+ ou MariaDB 10.6+ |
+| Servidor web | Apache ou LiteSpeed com `.htaccess` (`mod_rewrite` e `mod_headers`) |
+| HTTPS | Certificado válido |
+| E-mail (opcional) | Caixa com SMTP para o aviso de novas solicitações |
 
-Na Hostinger, siga [HOSTINGER.md](HOSTINGER.md). **Hospedagem só de arquivos estáticos não atende.** Ela consegue servir `dist/`, mas sem o back end o formulário não funciona. Nesse caso, a menor adaptação é manter o site estático onde está e publicar apenas este servidor Node num plano que suporte Node.js + MySQL (por exemplo, os planos da Hostinger com Node.js, ou uma VPS), apontando o domínio para ele. Nenhum serviço foi contratado.
+## Banco de dados e migrations
 
-## Primeira publicação
+- As migrations ficam em `migrations/NNN_nome.sql`. Elas só adicionam e nunca são revertidas automaticamente.
+- Com `AUTO_MIGRATE` ligado (padrão), as pendentes são aplicadas no primeiro acesso a uma rota que usa o banco, com uma trava (`GET_LOCK`) contra execuções simultâneas.
+- Em servidores com usuários separados (VPS), `docs/database-setup.sql` cria um usuário da aplicação sem DDL e outro só para as migrations (`DB_MIGRATION_USER`). Na hospedagem compartilhada, o usuário do hPanel cumpre os dois papéis.
 
-```bash
-npm ci --omit=dev                 # dependências de produção
-SITE_URL=https://bralvex.com npm run build   # gera dist/
-cp .env.example .env              # preencher fora do repositório
-npm run migrate                   # com DB_MIGRATION_USER/PASSWORD
-npm run admin:create -- pessoa@bralvex.com
-npm start
-```
+## Backups
 
-- `HOST=127.0.0.1` e `TRUST_PROXY=1` quando houver proxy reverso (padrão das hospedagens gerenciadas). Sem `TRUST_PROXY`, o cookie `Secure` não é emitido atrás do proxy e o limite por IP enxerga o IP do proxy.
-- Nos painéis de hospedagem que configuram Node.js, use `npm run build` como comando de build e `npm start` (ou `server/index.js`) como entrada. As variáveis do `.env.example` vão no painel, não em arquivos versionados.
-- A raiz `/` redireciona com 301 para `/pt/`, e os links antigos com âncora (`/#patrocinar`) continuam funcionando.
+- **Automáticos:** os da hospedagem (hPanel → Backups).
+- **Exportação mensal:** pelo phpMyAdmin, guardada fora do servidor. Em servidor com terminal:
 
-## Atualizações
-
-1. `git pull` na branch aprovada.
-2. `npm ci --omit=dev && npm run build`
-3. **Backup do banco** (abaixo) e depois `npm run migrate`. As migrations só adicionam e nunca são revertidas automaticamente.
-4. Reiniciar o processo Node.
-
-## Backups automáticos
-
-Agendar diariamente (cron do servidor ou backup gerenciado da hospedagem):
-
-```bash
-mysqldump --single-transaction --routines --no-tablespaces \
-  -h 127.0.0.1 -u bralvex_backup -p"$BACKUP_DB_PASSWORD" bralvex \
-  | gzip > /caminho/privado/backups/bralvex-$(date -u +%F).sql.gz
-find /caminho/privado/backups -name 'bralvex-*.sql.gz' -mtime +30 -delete
-```
-
-- Guardar fora da pasta pública do site, com acesso restrito (`chmod 600`), e copiar para um segundo local (armazenamento externo criptografado).
-- A retenção dos backups deve seguir a mesma política definida para os leads (pendência em `docs/PENDENCIAS.md`).
+  ```bash
+  mysqldump --single-transaction --no-tablespaces -h 127.0.0.1 -u USUARIO -p BANCO | gzip > bralvex-$(date -u +%F).sql.gz
+  ```
+- **Proteção dos arquivos:** acesso restrito e cópia num segundo local (armazenamento externo criptografado).
+- **Retenção:** a dos backups deve acompanhar a política de retenção dos leads.
 
 ## Restauração
 
-Teste a restauração periodicamente, num banco separado:
+Teste periodicamente, num banco separado:
 
-```bash
-mysql -h 127.0.0.1 -u root -p -e "CREATE DATABASE bralvex_restore CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-gunzip -c bralvex-AAAA-MM-DD.sql.gz | mysql -h 127.0.0.1 -u root -p bralvex_restore
-mysql -u root -p bralvex_restore -e "SELECT COUNT(*) FROM leads; SELECT version FROM schema_migrations;"
-```
+1. Crie um banco vazio (ex.: `u123_restore`) no hPanel.
+2. Importe o arquivo pelo phpMyAdmin (aba Importar) ou com `gunzip -c arquivo.sql.gz | mysql -u USUARIO -p u123_restore`.
+3. Confira as contagens:
+   ```sql
+   SELECT COUNT(*) FROM leads;
+   SELECT version FROM schema_migrations;
+   ```
 
-Para restaurar em produção: parar a aplicação, renomear o banco atual (sem apagá-lo), restaurar em `bralvex`, conferir as contagens, aplicar `npm run migrate` e religar a aplicação.
+**Para restaurar em produção:**
+
+1. Exporte o estado atual.
+2. Restaure no banco do site, ou aponte `DB_NAME` em `config.php` para o banco restaurado.
+3. Confira o painel.
+
+As migrations que faltarem são aplicadas sozinhas no próximo acesso.
 
 ## Segurança operacional
 
-- `.env`, backups e logs ficam fora do repositório (`.gitignore`) e fora da raiz pública.
-- Os logs são JSON de uma linha e não registram corpo de requisição, senhas, tokens ou cookies. O IP não é gravado no banco; ele só existe em memória para o limite de requisições.
-- Limites atuais: 16 KB por envio do formulário, 5 envios a cada 10 minutos por IP, 15 s por requisição e 8 s por consulta.
-- Mensagens públicas de erro são genéricas; os detalhes ficam só no log interno.
-- Revise `npm audit` e as versões do Node a cada atualização.
-- Os dados do formulário não são enviados a ferramentas de analytics. Se alguma for adicionada ao site, não deve capturar campos nem a URL de `/api`.
+- **Nada sensível em público:** `config.php`, logs e backups nunca ficam em `public_html` nem no Git (`.gitignore`). A pasta `deploy/`, gerada pelo `npm run hostinger`, contém senhas e deve ser apagada depois do envio.
+- **Logs:** ficam em `bralvex-app/storage/app.log`, em JSON de uma linha. Não registram corpo de requisição, senhas, tokens ou cookies.
+- **IP do visitante:** não é gravado em lugar nenhum. Os limites de tentativas usam só um HMAC, com expiração.
+- **Limites atuais:**
+  - 16 KB por envio do formulário;
+  - 5 envios a cada 10 minutos por IP;
+  - 10 logins a cada 15 minutos por IP;
+  - 5 falhas por e-mail.
+- **Mensagens de erro:** as públicas são genéricas.
+- **Analytics:** os dados do formulário não são enviados a ferramentas de análise. Se alguma for adicionada ao site, não deve capturar campos nem a URL de `/api`.
+- **Atualizações:** mantenha o PHP da hospedagem numa versão com suporte (hPanel → Configuração do PHP) e rode `npm audit` antes de gerar pacotes.

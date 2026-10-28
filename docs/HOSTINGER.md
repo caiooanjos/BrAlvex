@@ -1,149 +1,106 @@
-# Instalação na Hostinger
+# Instalação na Hostinger (plano Premium)
 
-Passo a passo para publicar o site, o formulário e o painel em `bralvex.com`, usando o recurso **Node.js web app** do hPanel.
+O plano **Premium Web Hosting** roda PHP + MySQL, mas não Node.js. Por isso o site foi preparado assim:
 
-## 0. O que precisa existir antes
+- **Páginas:** HTML estático, entregue direto pelo servidor da Hostinger.
+- **Formulário e painel:** PHP, com banco MySQL.
+- **Seu computador:** o Node.js serve apenas para gerar os pacotes de publicação.
 
-- **Plano com Node.js:** Business Web Hosting ou Cloud (Startup, Professional, Enterprise ou Enterprise Plus). Os planos Single e Premium **não** rodam Node.js. Confira em hPanel → Websites → Add Website: a opção **Node.js web app** precisa aparecer.
-- Acesso ao painel da **Locaweb**, onde está o DNS de `bralvex.com`.
-- O código no GitHub (`caiooanjos/BrAlvex`), com a branch `feat/bilingue-solicitacao-teste` aprovada e mesclada na `main`. Também é possível enviar um `.zip` (passo 3).
+Nada precisa ser instalado na Hostinger e não é preciso terminal (SSH).
 
-## 1. Gerar os segredos
-
-No seu computador, rode duas vezes e guarde os resultados num gerenciador de senhas:
-
-```bash
-node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+domains/bralvex.com/
+├── public_html/        ← site público + app.php (vem de public_html.zip)
+└── bralvex-app/        ← código PHP, configuração e senhas (vem de bralvex-app.zip)
+                          fica FORA da pasta pública: ninguém acessa pela internet
 ```
 
-O primeiro resultado é o `SESSION_SECRET` e o segundo, o `FORM_TOKEN_SECRET`. Eles precisam ser diferentes.
+## 1. Criar o banco de dados
 
-## 2. Criar o banco de dados
+1. hPanel → **Websites** → **Gerenciar** (bralvex.com) → **Bancos de dados** → **Gerenciamento**.
+2. Crie um banco com:
+   - nome: `bralvex`
+   - usuário: `bralvex`
+   - senha: uma senha forte nova
+3. Anote os nomes completos. A Hostinger acrescenta um prefixo, por exemplo `u123456789_bralvex`.
 
-1. hPanel → **Websites** → **Gerenciar** (no site bralvex.com) → **Bancos de dados** → **Gerenciamento**.
-2. Preencha:
-   - Nome do banco: `bralvex`
-   - Usuário: `bralvex`
-   - Senha: uma senha forte nova
-3. Clique em **Criar**. A Hostinger adiciona um prefixo aos nomes, por exemplo `u123456789_bralvex`. Anote os nomes completos.
+Não é preciso criar tabelas: elas são criadas sozinhas no primeiro acesso.
 
-O usuário criado pelo hPanel tem permissão total sobre esse banco. A separação entre usuário da aplicação e usuário de migrations (`docs/database-setup.sql`) não está disponível desse jeito na hospedagem compartilhada. Use o mesmo usuário nos dois papéis.
+## 2. (Opcional) Criar a caixa de e-mail
 
-## 3. Criar o app Node.js
+hPanel → **E-mails** → crie `contact@bralvex.com`, se ainda não existir. A senha dessa caixa permite que o site avise a equipe a cada nova solicitação. Isso pode ficar para depois.
 
-1. hPanel → **Websites** → **Add Website** → **Node.js web app**.
-2. Origem do código:
-   - **GitHub (recomendado):** conecte a conta e escolha o repositório `BrAlvex`, branch `main`. Cada push publica sozinho.
-   - **Arquivo .zip:** no seu computador, gere o pacote sem `node_modules` nem `.git`:
-     ```bash
-     git archive --format=zip -o bralvex-deploy.zip HEAD
-     ```
-3. Configurações de build:
+## 3. Gerar os pacotes no seu computador
 
-   | Campo | Valor |
-   | --- | --- |
-   | Framework preset | Express (ou Other) |
-   | Node.js version | **24** |
-   | Build command | `npm run build` |
-   | Entry file | `server/index.js` |
-   | Output directory | deixe vazio |
+Na pasta do projeto, rode:
 
-4. **Variáveis de ambiente** (na mesma tela, ou depois em Settings → Environment variables):
+```bash
+npm install
+npm run hostinger
+```
 
-   ```
-   NODE_ENV=production
-   SITE_URL=https://bralvex.com
-   TRUST_PROXY=1
-   DB_HOST=127.0.0.1
-   DB_PORT=3306
-   DB_NAME=u123456789_bralvex
-   DB_USER=u123456789_bralvex
-   DB_PASSWORD=(senha do passo 2)
-   SESSION_SECRET=(segredo 1)
-   FORM_TOKEN_SECRET=(segredo 2)
-   ```
+O comando pergunta:
 
-   - Use `127.0.0.1`, não `localhost`.
-   - Não defina `HOST` nem `PORT`; quem controla isso é a Hostinger.
-   - O e-mail de aviso (SMTP) vem no passo 7.
+- o endereço do site (padrão `https://bralvex.com`);
+- os dados do banco (passo 1);
+- o e-mail e a senha que você vai usar para entrar no painel (mínimo de 12 caracteres);
+- a senha da caixa `contact@bralvex.com` (opcional; deixe em branco para pular).
 
-5. Clique em **Deploy** e acompanhe em **Deployments**. Se o build passar mas o site não abrir, veja **Runtime logs**. A primeira linha mostra a versão do Node em uso. Se aparecer "Configuração inválida", falta alguma variável.
+As senhas não aparecem na tela. No fim, ficam prontos em `deploy/`:
 
-## 4. Criar as tabelas e o primeiro administrador
+- `public_html.zip`
+- `bralvex-app.zip`
 
-A hospedagem não oferece terminal para o app. Por isso, os dois comandos rodam **do seu computador**, conectando ao banco da Hostinger por acesso remoto temporário.
+As chaves de segurança são geradas automaticamente. A senha do painel é guardada só em formato criptografado (hash).
 
-1. Descubra o seu IP público (por exemplo, em https://meuip.com.br).
-2. hPanel → **Bancos de dados** → **MySQL remoto**: adicione esse IP e selecione o banco `u123456789_bralvex`. Anote o **host remoto** exibido, no formato `srvNNNN.hstgr.io`.
-3. Na pasta do projeto, crie o arquivo `.env.hostinger`. Ele é ignorado pelo Git e nunca deve ser enviado.
-   ```
-   NODE_ENV=production
-   SITE_URL=https://bralvex.com
-   DB_HOST=srvNNNN.hstgr.io
-   DB_PORT=3306
-   DB_NAME=u123456789_bralvex
-   DB_USER=u123456789_bralvex
-   DB_PASSWORD=(senha do passo 2)
-   SESSION_SECRET=(segredo 1)
-   FORM_TOKEN_SECRET=(segredo 2)
-   ```
-4. Rode:
-   ```bash
-   node --env-file=.env.hostinger server/migrate.js
-   node --env-file=.env.hostinger server/cli/admin.js create seu.email@bralvex.com
-   ```
-   O segundo comando pede a senha do painel: mínimo de 12 caracteres, digitada sem aparecer na tela.
-5. **Remova o seu IP** do MySQL remoto e apague o `.env.hostinger`.
+## 4. Enviar pelo Gerenciador de Arquivos
 
-Repita esses passos sempre que uma atualização trouxer uma migration nova (arquivo novo em `migrations/`) ou quando precisar criar ou redefinir um administrador (`reset-password`, `deactivate`).
+hPanel → **Websites** → **Gerenciar** → **Gerenciador de Arquivos**.
 
-## 5. Apontar o domínio (DNS na Locaweb)
+1. Abra `domains/bralvex.com/public_html/`.
+2. **Apague o que já estiver lá**, como a página padrão da Hostinger (`default.php`, `index.php` etc.). Confira antes se não há nada que precise ser mantido.
+3. Envie `public_html.zip` para essa pasta, clique com o botão direito → **Extrair** (para a própria pasta) e depois apague o `.zip`.
+4. Volte um nível, para `domains/bralvex.com/`.
+5. Envie `bralvex-app.zip` ali, ao lado de `public_html` e **não dentro dela**. Extraia e apague o `.zip`. Deve surgir a pasta `bralvex-app`.
+6. **Apague a pasta `deploy/` do seu computador.** Ela contém as senhas.
 
-Hoje `bralvex.com` já aponta para a Hostinger (CDN, IP `103.169.142.0`) e responde 404. Isso indica que já existe um site vazio cadastrado para esse domínio no hPanel.
+Arquivos que começam com ponto (`.htaccess`) podem ficar ocultos no Gerenciador. Eles são enviados mesmo assim.
 
-- Se, ao criar o app no passo 3, o hPanel não aceitar `bralvex.com` por já estar em uso, **remova primeiro o site vazio** (confira antes se não há nada nele) e crie o app de novo.
-- Com o app criado em `bralvex.com`, teste o endereço. Se ele já abrir o site, o DNS está certo e você pode pular para o passo 6.
+## 5. Conferir o PHP e o SSL
 
-Caso contrário:
+- hPanel → **Avançado** → **Configuração do PHP**: use **PHP 8.2 ou mais novo** (recomendado 8.3).
+- hPanel → **Segurança** → **SSL**: o certificado deve estar ativo para `bralvex.com`. O site força HTTPS sozinho.
 
-1. No hPanel, abra o app e vá em **Domínio**. Anote o **IP** (registro A) indicado.
-2. No painel de DNS da Locaweb:
-   - `@` (bralvex.com): registro **A** com o IP indicado, substituindo o atual (`103.169.142.0`).
-   - `www`: **CNAME** para `bralvex.com`, ou registro A com o mesmo IP.
-   - **Não altere os registros MX.** Eles já apontam para o e-mail da Hostinger.
-3. A propagação leva de minutos a algumas horas. Depois disso, o hPanel instala o **SSL gratuito** sozinho. Confira em Websites → Segurança → SSL.
+## 6. Primeiro acesso e testes
 
-## 6. Testar em produção
-
-- `https://bralvex.com` deve abrir `/pt/`, e o seletor deve levar a `/en/`.
-- Envie uma solicitação de teste pelo formulário e confira se ela aparece em `https://bralvex.com/admin/leads`.
-- Pastas como `https://bralvex.com/server/` ou `https://bralvex.com/assets/` devem responder "Página não encontrada".
-
-## 7. E-mail `contact@bralvex.com` e aviso de novos leads
-
-1. hPanel → **E-mails** → crie a caixa `contact@bralvex.com`, se ainda não existir.
-2. Adicione ao app as variáveis abaixo e clique em **Redeploy**:
-   ```
-   SMTP_HOST=smtp.hostinger.com
-   SMTP_PORT=465
-   SMTP_SECURE=true
-   SMTP_USER=contact@bralvex.com
-   SMTP_PASSWORD=(senha da caixa)
-   NOTIFY_FROM=contact@bralvex.com
-   NOTIFY_TO=contact@bralvex.com
-   ```
-3. Envie um teste pelo formulário. A notificação traz apenas o idioma, o objetivo e o link para o painel; as respostas e os dados de contato não vão no e-mail.
-
-Sem esse passo, o site funciona normalmente e os leads aparecem no painel, mas sem aviso por e-mail.
-
-## 8. Backups
-
-- A Hostinger faz backups automáticos do site e do banco (hPanel → **Backups**). A frequência depende do plano.
-- Recomendado: uma vez por mês, exporte o banco em hPanel → Bancos de dados → **phpMyAdmin** → Exportar, e guarde o arquivo num local seguro.
-- Para restaurar: hPanel → Backups → Banco de dados → escolha a data. Antes, exporte o estado atual.
+1. Abra `https://bralvex.com/admin/leads`. Nesse primeiro acesso, as tabelas e o seu usuário do painel são criados.
+2. Entre com o e-mail e a senha definidos no passo 3.
+3. Abra `https://bralvex.com`: deve ir para `/pt/`, e o seletor de idioma deve levar a `/en/`.
+4. Envie uma solicitação pelo formulário e confira se ela aparece no painel.
+5. Endereços internos devem responder "Página não encontrada", por exemplo:
+   - `https://bralvex.com/app.php`
+   - `https://bralvex.com/.htaccess`
 
 ## Atualizações futuras
 
-- **Pelo GitHub:** faça push na `main` e a Hostinger reconstrói sozinha.
-- **Por .zip:** gere o pacote de novo e envie em Deployments.
-- **Se houver migration nova**, repita o passo 4 depois do deploy.
+1. Rode `npm run hostinger` de novo. Use os mesmos dados de banco; o e-mail e a senha do painel podem ser os mesmos.
+2. Substitua os arquivos de `public_html/` pelos do novo `public_html.zip`.
+3. **Também substitua `bralvex-app`**: as chaves de segurança são geradas de novo a cada pacote. Isso apenas encerra as sessões abertas no painel.
+4. Se houver mudança no banco, ela é aplicada sozinha no primeiro acesso.
+
+## Senha do painel
+
+- **Esqueceu a senha ou quer trocá-la:** gere o pacote de novo com a nova senha e substitua só o arquivo `bralvex-app/config.php`. A nova senha passa a valer no próximo acesso e encerra as sessões abertas.
+- **Mais pessoas no painel:** veja [ADMIN.md](ADMIN.md).
+
+## Backups
+
+- A Hostinger faz backups automáticos (hPanel → **Backups**); a frequência depende do plano.
+- Recomendado: uma vez por mês, exporte o banco em hPanel → Bancos de dados → **phpMyAdmin** → Exportar, e guarde o arquivo num local seguro.
+- Para restaurar: hPanel → Backups → Banco de dados → escolha a data. Antes, exporte o estado atual.
+
+## Se algo der errado
+
+- **"Erro interno" em `/admin` ou no envio do formulário:** confira os dados do banco em `bralvex-app/config.php` e se a pasta `bralvex-app` está ao lado de `public_html`. O registro de erros fica em `bralvex-app/storage/app.log`, sem dados do formulário.
+- **Página em branco ou erro 500 em tudo:** confira a versão do PHP (passo 5).
+- **E-mail de aviso não chega:** a solicitação continua gravada no painel; no detalhe dela, "Aviso por e-mail" mostra "Falhou" ou "Não enviado". Confira a senha da caixa `contact@bralvex.com` e gere o pacote de novo.

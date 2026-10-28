@@ -1,13 +1,54 @@
-# Proteção para quando dist/ for servido diretamente por Apache/LiteSpeed (ex.: hospedagem só estática).
-# Com o servidor Node, este arquivo não é usado nem servido.
-Options -Indexes
-DirectoryIndex index.html
-ErrorDocument 403 /pt/
-ErrorDocument 404 /pt/
+# Configuração do servidor web (Apache/LiteSpeed, ex.: Hostinger) para public_html.
+# Arquivos estáticos são entregues direto; formulário, API e painel vão para app.php.
+# O roteador de desenvolvimento (php/dev-router.php) reproduz estas regras.
 
-<FilesMatch "^\.">
+Options -Indexes -MultiViews
+DirectoryIndex index.html
+ErrorDocument 404 /404.html
+ErrorDocument 403 /404.html
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Sempre HTTPS.
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+
+  # Arquivos e pastas ocultos (exceto .well-known, usado na emissão do SSL) e acesso direto a scripts.
+  RewriteRule (^|/)\.(?!well-known(/|$)) - [R=404,L]
+  RewriteCond %{THE_REQUEST} \s/+[^\s?]*\.php[\s?/] [NC]
+  RewriteRule ^ - [R=404,L]
+
+  # Endereços antigos e atalhos → rotas por idioma (o navegador mantém o #âncora).
+  RewriteRule ^(index\.html)?$ /pt/ [R=301,L]
+  RewriteRule ^pt$ /pt/ [R=301,L]
+  RewriteRule ^en$ /en/ [R=301,L]
+  RewriteRule ^(pt/)?solicitar-teste$ /pt/solicitar-teste/ [R=301,L]
+  RewriteRule ^(en/)?request-trial$ /en/request-trial/ [R=301,L]
+  RewriteRule ^privacidade$ /pt/privacidade/ [R=301,L]
+  RewriteRule ^privacy$ /en/privacy/ [R=301,L]
+
+  # Rotas dinâmicas.
+  RewriteRule ^(pt/solicitar-teste|en/request-trial)/$ app.php [L]
+  RewriteRule ^api/ app.php [L]
+  RewriteRule ^admin(/.*)?$ app.php [L]
+</IfModule>
+
+<FilesMatch "\.(env|sql|gz|zip|log|md|mjs|ini|sh|lock|json)$">
   Require all denied
 </FilesMatch>
-<FilesMatch "\.(env|sql|gz|zip|log|md|mjs|json|lock|ini|sh)$">
-  Require all denied
-</FilesMatch>
+
+<IfModule mod_headers.c>
+  Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; upgrade-insecure-requests"
+  Header always set Strict-Transport-Security "max-age=31536000"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set X-Frame-Options "DENY"
+  <FilesMatch "\.(html|xml)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+  <FilesMatch "\.(css|js|svg|png|jpe?g|webp|ico|woff2)$">
+    Header set Cache-Control "public, max-age=3600"
+  </FilesMatch>
+</IfModule>

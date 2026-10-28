@@ -91,8 +91,30 @@ test("raiz antiga redireciona preservando a âncora", async () => {
   assert.match(script, /location\.hash/);
 });
 
-test("dist/ bloqueia listagem de pastas quando servido por Apache/LiteSpeed", async () => {
+test(".htaccess: sem listagem, HTTPS, bloqueios e rotas dinâmicas para app.php", async () => {
   const htaccess = await read(".htaccess");
   assert.match(htaccess, /Options -Indexes/);
   assert.match(htaccess, /Require all denied/);
+  for (const rule of [
+    "RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]",
+    "RewriteRule (^|/)\\.(?!well-known(/|$)) - [R=404,L]",
+    "RewriteRule ^api/ app.php [L]",
+    "RewriteRule ^admin(/.*)?$ app.php [L]",
+    "RewriteRule ^(pt/solicitar-teste|en/request-trial)/$ app.php [L]",
+  ]) {
+    assert.ok(htaccess.includes(rule), rule);
+  }
+  assert.match(await read("404.html"), /Página não encontrada/);
+});
+
+test("dados gerados para o PHP vêm da mesma fonte do site", async () => {
+  const gen = (name) => readFile(new URL(`../php/app/generated/${name}`, import.meta.url), "utf8");
+  const schema = JSON.parse(await gen("schema.json"));
+  const { FORM_VERSION, OPTIONS } = await import("../shared/form-schema.js");
+  assert.equal(schema.FORM_VERSION, FORM_VERSION);
+  assert.deepEqual(schema.OPTIONS, OPTIONS);
+  const content = JSON.parse(await gen("content.json"));
+  assert.equal(content.countries_pt.BR, "Brasil");
+  assert.equal(content.en.routes.trialReceived, "/en/request-trial/received/");
+  for (const lang of ["pt", "en"]) assert.match(await gen(`nojs-${lang}.html`), /<li>@@MESSAGES@@<\/li>/);
 });

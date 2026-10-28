@@ -1,16 +1,16 @@
-// Testes de ponta a ponta contra um MySQL real (mysql-memory-server baixa e executa o binário oficial).
+// Testes de ponta a ponta do back end PHP contra um MySQL real (mysql-memory-server baixa e executa o binário oficial).
+// O servidor embutido do PHP roda com php/dev-router.php, que reproduz as regras do .htaccess de produção.
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { createDB } from "mysql-memory-server";
 import mysql from "mysql2/promise";
 import { build } from "../site/build.mjs";
-import { createApp } from "../server/app.js";
-import { createAdmin, resetPassword } from "../server/cli/admin.js";
-import { loadConfig } from "../server/config.js";
-import { createPool } from "../server/db.js";
-import { silentLog } from "../server/log.js";
-import { migrate } from "../server/migrate.js";
 import { FORM_VERSION, PRIVACY_NOTICE_VERSION } from "../shared/form-schema.js";
+import { freePort, phpCli, startPhpServer } from "../scripts/php.mjs";
 import { validLead } from "./helpers.js";
 
 const ADMIN_EMAIL = "admin@example.com";
@@ -19,12 +19,11 @@ const APP_PASSWORD = "app-user-password-for-tests";
 
 let mysqlServer;
 let rootConn;
-let pool;
 const servers = [];
 
 function baseEnv(overrides = {}) {
   return {
-    NODE_ENV: "test",
+    APP_ENV: "test",
     SITE_URL: "http://127.0.0.1",
     DB_HOST: "127.0.0.1",
     DB_PORT: String(mysqlServer.port),
@@ -34,36 +33,24 @@ function baseEnv(overrides = {}) {
     SESSION_SECRET: "a".repeat(40),
     FORM_TOKEN_SECRET: "b".repeat(40),
     FORM_TOKEN_MIN_SECONDS: "0",
-    LEAD_RATE_MAX: "100",
+    LEAD_RATE_MAX: "1000",
+    LOGIN_RATE_MAX: "1000",
+    AUTO_MIGRATE: "false",
+    STORAGE_DIR: mkdtempSync(join(tmpdir(), "bralvex-storage-")),
     ...overrides,
   };
 }
 
-async function start(envOverrides = {}, { poolOverride, notifier } = {}) {
-  const config = loadConfig(baseEnv(envOverrides));
-  const appPool = poolOverride || pool;
-  const notified = [];
-  const app = createApp({
-    config,
-    pool: appPool,
-    log: silentLog,
-    notifier: notifier || { notifyNewLead: async (lead) => notified.push(lead) },
-  });
-  const server = await new Promise((resolve) => {
-    const s = app.listen(0, "127.0.0.1", () => resolve(s));
-  });
+async function start(envOverrides = {}) {
+  const server = await startPhpServer(baseEnv(envOverrides));
   servers.push(server);
-  const base = `http://127.0.0.1:${server.address().port}`;
-  return { base, config, notified, app };
+  return server;
 }
 
 /** Cliente HTTP mínimo com cookie de sessão. */
 function client(base) {
   let cookie = "";
   return {
-    get cookie() {
-      return cookie;
-    },
     async request(path, { method = "GET", headers = {}, body } = {}) {
       const res = await fetch(base + path, {
         method,
@@ -71,7 +58,7 @@ function client(base) {
         headers: { ...(cookie ? { cookie } : {}), ...headers },
         body,
       });
-      const set = res.headers.get("set-cookie");
+      const set = res.headers.getSetCookie().at(-1);
       if (set) cookie = set.split(";")[0];
       return res;
     },
@@ -122,37 +109,117 @@ async function csrfFrom(c, path) {
   return page.match(/name="_csrf" value="([^"]+)"/)[1];
 }
 
+/** O aviso por e-mail roda depois da resposta ao visitante; aguarda o status final. */
+async function notificationStatus(submissionKey) {
+  for (let i = 0; i < 50; i++) {
+    const { notification_status: status } = await leadRow(submissionKey);
+    if (status !== "pending") return status;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return "pending";
+}
+
+async function leadRow(submissionKey) {
+  const [rows] = await rootConn.query("SELECT * FROM leads WHERE submission_key = ?", [submissionKey]);
+  return rows[0];
+}
+
+/** Servidor SMTP mínimo, só para os testes, que guarda as mensagens recebidas. */
+async function fakeSmtp() {
+  const messages = [];
+  const server = createServer((socket) => {
+    let data = null;
+    socket.on("error", () => {});
+    socket.write("220 fake ESMTP\r\n");
+    socket.on("data", (chunk) => {
+      for (const line of chunk.toString().split("\r\n")) {
+        if (data !== null) {
+          if (line === ".") {
+            messages.push(data.join("\n"));
+            data = null;
+            socket.write("250 queued\r\n");
+          } else data.push(line);
+        } else if (/^EHLO/i.test(line)) socket.write("250-fake\r\n250 AUTH LOGIN\r\n");
+        else if (/^AUTH LOGIN/i.test(line)) socket.write("334 VXNlcm5hbWU6\r\n");
+        else if (/^[A-Za-z0-9+/=]{4,}$/.test(line) && !/^(MAIL|RCPT|DATA|QUIT)/i.test(line)) socket.write(messages.authStep++ ? "235 ok\r\n" : "334 UGFzc3dvcmQ6\r\n");
+        else if (/^(MAIL|RCPT)/i.test(line)) socket.write("250 ok\r\n");
+        else if (/^DATA/i.test(line)) {
+          data = [];
+          socket.write("354 go\r\n");
+        } else if (/^QUIT/i.test(line)) socket.end("221 bye\r\n");
+      }
+    });
+  });
+  messages.authStep = 0;
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  return { port: server.address().port, messages, close: () => server.close() };
+}
+
 before(async () => {
   await build({ quiet: true });
   mysqlServer = await createDB({ dbName: "bralvex_test", logLevel: "ERROR" });
-  const rootDb = { host: "127.0.0.1", port: mysqlServer.port, user: mysqlServer.username, password: "", database: mysqlServer.dbName };
-  await migrate(rootDb, { log: () => {} });
-  // Usuário da aplicação com privilégios mínimos (sem DDL), como em produção.
-  rootConn = await mysql.createConnection({ ...rootDb, timezone: "Z" });
+  const rootEnv = { DB_MIGRATION_USER: mysqlServer.username, DB_MIGRATION_PASSWORD: "" };
+  const migrated = await phpCli(["migrate"], { env: baseEnv(rootEnv) });
+  assert.equal(migrated.status, 0, migrated.stderr);
+  // Usuário da aplicação com privilégios mínimos (sem DDL).
+  rootConn = await mysql.createConnection({
+    host: "127.0.0.1",
+    port: mysqlServer.port,
+    user: mysqlServer.username,
+    database: mysqlServer.dbName,
+    timezone: "Z",
+  });
   await rootConn.query("CREATE USER 'bralvex_app'@'%' IDENTIFIED BY ?", [APP_PASSWORD]);
   await rootConn.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON \`${mysqlServer.dbName}\`.* TO 'bralvex_app'@'%'`);
-  pool = createPool(loadConfig(baseEnv()).db);
-  await createAdmin(pool, ADMIN_EMAIL, ADMIN_PASSWORD);
+  const created = await phpCli(["admin:create", ADMIN_EMAIL], { env: baseEnv(), input: `${ADMIN_PASSWORD}\n` });
+  assert.equal(created.status, 0, created.stderr);
 });
 
 after(async () => {
-  for (const s of servers) s.close();
-  await pool?.end();
+  for (const s of servers) s.stop();
   await rootConn?.end();
   await mysqlServer?.stop();
 });
 
 describe("migrations e banco", () => {
   test("migrations são idempotentes", async () => {
-    const applied = await migrate(
-      { host: "127.0.0.1", port: mysqlServer.port, user: mysqlServer.username, password: "", database: mysqlServer.dbName },
-      { log: () => {} },
-    );
-    assert.deepEqual(applied, []);
+    const again = await phpCli(["migrate"], { env: baseEnv({ DB_MIGRATION_USER: mysqlServer.username }) });
+    assert.equal(again.status, 0, again.stderr);
+    assert.match(again.stdout, /Nenhuma migration pendente/);
   });
 
   test("usuário da aplicação não tem privilégio de DDL", async () => {
-    await assert.rejects(pool.query("DROP TABLE leads"), /denied/i);
+    const app = await mysql.createConnection({ host: "127.0.0.1", port: mysqlServer.port, user: "bralvex_app", password: APP_PASSWORD, database: mysqlServer.dbName });
+    await assert.rejects(app.query("DROP TABLE leads"), /denied/i);
+    await app.end();
+  });
+
+  test("instalação nova: cria as tabelas no primeiro acesso e aplica o administrador inicial uma vez", async () => {
+    await rootConn.query("CREATE DATABASE bralvex_fresh");
+    const hash = (await phpCli(["hash-password"], { input: "senha-inicial-segura\n" })).stdout.trim();
+    assert.match(hash, /^\$2y\$12\$/);
+    const env = { DB_NAME: "bralvex_fresh", DB_USER: mysqlServer.username, DB_PASSWORD: "", AUTO_MIGRATE: "true", ADMIN_SEED_EMAIL: "Dona@BrAlveX.com", ADMIN_SEED_PASSWORD_HASH: hash };
+    const { base } = await start(env);
+    assert.equal((await fetch(`${base}/admin/login`)).status, 200);
+    const [tables] = await rootConn.query("SELECT version FROM bralvex_fresh.schema_migrations ORDER BY version");
+    assert.deepEqual(tables.map((t) => t.version), ["001_initial.sql", "002_rate_limits_app_state.sql"]);
+    assert.equal((await login(base, "dona@bralvex.com", "senha-inicial-segura")).res.status, 303);
+    // Upgrade transparente do hash para argon2id no primeiro login.
+    const [[admin]] = await rootConn.query("SELECT password_hash FROM bralvex_fresh.admins WHERE email = 'dona@bralvex.com'");
+    assert.match(admin.password_hash, /^\$argon2id\$/);
+
+    // Reiniciar com o mesmo administrador inicial não redefine a senha nem duplica a conta.
+    const again = await start(env);
+    assert.equal((await login(again.base, "dona@bralvex.com", "senha-inicial-segura")).res.status, 303);
+    const [[{ n }]] = await rootConn.query("SELECT COUNT(*) AS n FROM bralvex_fresh.admins");
+    assert.equal(n, 1);
+
+    // Um hash novo no config.php funciona como redefinição de senha.
+    const newHash = (await phpCli(["hash-password"], { input: "outra-senha-bem-segura\n" })).stdout.trim();
+    const reset = await start({ ...env, ADMIN_SEED_PASSWORD_HASH: newHash });
+    assert.equal((await login(reset.base, "dona@bralvex.com", "senha-inicial-segura")).res.status, 401);
+    assert.equal((await login(reset.base, "dona@bralvex.com", "outra-senha-bem-segura")).res.status, 303);
+    await rootConn.query("DROP DATABASE bralvex_fresh");
   });
 });
 
@@ -165,6 +232,7 @@ describe("site público", () => {
       ["/solicitar-teste", "/pt/solicitar-teste/"],
       ["/request-trial", "/en/request-trial/"],
       ["/en", "/en/"],
+      ["/privacy", "/en/privacy/"],
     ]) {
       const res = await fetch(base + from, { redirect: "manual" });
       assert.equal(res.status, 301, from);
@@ -181,6 +249,7 @@ describe("site público", () => {
     assert.match(await (await fetch(`${base}/en/`)).text(), /Turn complexity into decisions/);
     const trial = await fetch(`${base}/en/request-trial/`);
     assert.equal(trial.headers.get("cache-control"), "no-store");
+    assert.match(trial.headers.get("content-security-policy"), /frame-ancestors 'none'/);
     const body = await trial.text();
     assert.doesNotMatch(body, /__FORM_TOKEN__/);
     assert.match(body, /name="form_token" value="\d+\.[\w-]+\.[\w-]+"/);
@@ -190,21 +259,22 @@ describe("site público", () => {
   test("não lista pastas nem expõe código, configuração ou banco", async () => {
     const { base } = await start();
     const paths = [
-      "/assets/", "/src/", "/shared/", "/server/", "/server/config.js", "/migrations/001_initial.sql",
-      "/.env", "/.env.example", "/.htaccess", "/package.json", "/node_modules/", "/dist/", "/docs/", "/.git/config",
+      "/assets/", "/src/", "/shared/", "/server/", "/app.php", "/bralvex-app/config.php", "/php/app/cli.php",
+      "/migrations/001_initial.sql", "/.env", "/.htaccess", "/package.json", "/node_modules/", "/dist/", "/docs/", "/.git/config",
+      "/admin/../php/app/config.php", "/api/../package.json",
     ];
     for (const path of paths) {
-      const res = await fetch(base + path);
+      const res = await fetch(base + path, { redirect: "manual" });
       const body = await res.text();
-      assert.notEqual(res.status, 200, path);
-      assert.doesNotMatch(body, /Index of|DB_PASSWORD|CREATE TABLE/i, path);
+      assert.ok(res.status >= 300, `${path} → ${res.status}`);
+      assert.doesNotMatch(body, /Index of|DB_PASSWORD|CREATE TABLE|<\?php/i, path);
     }
   });
 });
 
 describe("envio do formulário", () => {
   test("grava no banco e só então responde com sucesso", async () => {
-    const { base, notified } = await start();
+    const { base } = await start();
     const payload = await fullPayload(base, {
       lang: "en",
       marketing_opt_in: true,
@@ -215,12 +285,12 @@ describe("envio do formulário", () => {
     const res = await postLead(base, payload);
     assert.equal(res.status, 201);
     assert.deepEqual(await res.json(), { ok: true });
-    const [rows] = await rootConn.query("SELECT * FROM leads WHERE submission_key = ?", [payload.submission_key]);
-    assert.equal(rows.length, 1);
-    const lead = rows[0];
+    const lead = await leadRow(payload.submission_key);
     assert.equal(lead.lang, "en");
     assert.equal(lead.status, "new");
     assert.equal(lead.email, "maria@exemplo.com.br");
+    assert.equal(lead.website, "https://exemplo.com.br");
+    assert.equal(lead.whatsapp, "+5511912345678");
     assert.equal(lead.marketing_opt_in, 1);
     assert.ok(lead.marketing_opt_in_at);
     assert.equal(lead.privacy_notice_version, PRIVACY_NOTICE_VERSION);
@@ -228,9 +298,8 @@ describe("envio do formulário", () => {
     assert.equal(lead.utm_medium, null);
     assert.equal(lead.referrer_host, "linkedin.com");
     assert.ok(Math.abs(new Date(lead.created_at).getTime() - Date.now()) < 60000, "created_at em UTC");
-    await new Promise((r) => setTimeout(r, 20));
-    assert.equal(notified.length, 1);
-    assert.deepEqual(Object.keys(notified[0]).sort(), ["lang", "objective", "publicId"]);
+    // Sem SMTP configurado: nada é simulado, o lead fica marcado como "não enviado".
+    assert.equal(await notificationStatus(payload.submission_key), "skipped");
   });
 
   test("reenvio com a mesma chave não duplica o registro", async () => {
@@ -255,12 +324,9 @@ describe("envio do formulário", () => {
   test("tentativa de injeção é gravada como texto, sem efeito no banco", async () => {
     const { base } = await start();
     const evil = "Robert'); DROP TABLE leads;-- <script>alert(1)</script>";
-    const payload = await fullPayload(base, { company: evil.slice(0, 150) });
+    const payload = await fullPayload(base, { company: evil });
     assert.equal((await postLead(base, payload)).status, 201);
-    const [rows] = await rootConn.query("SELECT company FROM leads WHERE submission_key = ?", [payload.submission_key]);
-    assert.equal(rows[0].company, evil.slice(0, 150));
-    const [[{ n }]] = await rootConn.query("SELECT COUNT(*) AS n FROM leads");
-    assert.ok(n >= 1);
+    assert.equal((await leadRow(payload.submission_key)).company, evil);
   });
 
   test("armadilha, token ausente/expirado e versão desatualizada são recusados", async () => {
@@ -298,10 +364,14 @@ describe("envio do formulário", () => {
   });
 
   test("limita excesso de requisições", async () => {
+    await rootConn.query("DELETE FROM rate_limits");
     const { base } = await start({ LEAD_RATE_MAX: "2" });
     const statuses = [];
     for (let i = 0; i < 4; i++) statuses.push((await postLead(base, await fullPayload(base))).status);
     assert.deepEqual(statuses, [201, 201, 429, 429]);
+    const [[row]] = await rootConn.query("SELECT bucket FROM rate_limits LIMIT 1");
+    assert.match(row.bucket, /^[0-9a-f]{64}$/, "o IP não é guardado, só um HMAC");
+    await rootConn.query("DELETE FROM rate_limits");
   });
 
   test("envio sem JavaScript: sucesso redireciona e erro mostra página no idioma", async () => {
@@ -322,25 +392,38 @@ describe("envio do formulário", () => {
       body: new URLSearchParams({ ...data, email: "nope" }).toString(),
     });
     assert.equal(bad.status, 422);
-    assert.match(await bad.text(), /Enter a valid email address/);
+    const html = await bad.text();
+    assert.match(html, /Enter a valid email address/);
+    assert.match(html, /<html lang="en"/);
   });
 
   test("falha no banco retorna erro genérico, sem detalhes internos", async () => {
-    const brokenPool = createPool({ host: "127.0.0.1", port: 1, user: "x", password: "x", database: "x", connectionLimit: 1 });
-    const { base } = await start({}, { poolOverride: brokenPool });
+    const { base } = await start({ DB_PORT: String(await freePort()) });
     const res = await postLead(base, await fullPayload(base));
     assert.equal(res.status, 500);
-    const text = await res.text();
-    assert.equal(text, JSON.stringify({ ok: false, error: "server_error" }));
-    await brokenPool.end();
+    assert.equal(await res.text(), JSON.stringify({ ok: false, error: "server_error" }));
+  });
+
+  test("aviso por e-mail: envia só o mínimo e marca como enviado", async () => {
+    const smtp = await fakeSmtp();
+    after(() => smtp.close());
+    const { base } = await start({ SMTP_HOST: "127.0.0.1", SMTP_PORT: String(smtp.port), SMTP_SECURE: "false", SMTP_USER: "contact@bralvex.com", SMTP_PASSWORD: "x", NOTIFY_FROM: "contact@bralvex.com" });
+    const payload = await fullPayload(base);
+    assert.equal((await postLead(base, payload)).status, 201);
+    assert.equal(await notificationStatus(payload.submission_key), "sent");
+    const lead = await leadRow(payload.submission_key);
+    assert.equal(smtp.messages.length, 1);
+    const message = smtp.messages[0];
+    const body = Buffer.from(message.split("\n\n")[1].replace(/\n/g, ""), "base64").toString("utf8");
+    assert.match(body, new RegExp(`/admin/leads/${lead.public_id}`));
+    for (const secret of [lead.email, lead.full_name, lead.company, lead.challenge]) assert.ok(!message.includes(secret) && !body.includes(secret));
   });
 
   test("falha no aviso por e-mail não invalida o lead", async () => {
-    const { base } = await start({}, { notifier: { notifyNewLead: async () => { throw new Error("smtp down"); } } });
+    const { base } = await start({ SMTP_HOST: "127.0.0.1", SMTP_PORT: String(await freePort()), SMTP_SECURE: "false", NOTIFY_FROM: "contact@bralvex.com" });
     const payload = await fullPayload(base);
     assert.equal((await postLead(base, payload)).status, 201);
-    const [rows] = await rootConn.query("SELECT id FROM leads WHERE submission_key = ?", [payload.submission_key]);
-    assert.equal(rows.length, 1);
+    assert.equal(await notificationStatus(payload.submission_key), "failed");
   });
 });
 
@@ -374,10 +457,18 @@ describe("painel administrativo", () => {
 
     const { res } = await login(base);
     assert.equal(res.status, 303);
-    const setCookie = res.headers.get("set-cookie");
+    const setCookie = res.headers.getSetCookie().at(-1);
     assert.match(setCookie, /HttpOnly/i);
     assert.match(setCookie, /SameSite=Strict/i);
     assert.match(setCookie, /Path=\/admin/);
+  });
+
+  test("cookie Secure e com prefixo __Secure- em produção", async () => {
+    const { base } = await start({ APP_ENV: "production", SITE_URL: "https://bralvex.test" });
+    const { res } = await login(base);
+    assert.equal(res.status, 303);
+    assert.match(res.headers.getSetCookie().at(-1), /^__Secure-bralvex_admin=.*; Secure/);
+    assert.match(res.headers.get("strict-transport-security"), /max-age=31536000/);
   });
 
   test("bloqueia após tentativas repetidas", async () => {
@@ -397,7 +488,7 @@ describe("painel administrativo", () => {
       lang: "en",
     });
     await postLead(base, payload);
-    const [[lead]] = await rootConn.query("SELECT public_id FROM leads WHERE submission_key = ?", [payload.submission_key]);
+    const lead = await leadRow(payload.submission_key);
     const { c } = await login(base);
 
     const list = await (await c.request("/admin/leads?q=ana.filtro&lang=en&objective=api_integration&status=new")).text();
@@ -426,6 +517,7 @@ describe("painel administrativo", () => {
     assert.match(detail, /&lt;img src=x onerror=alert\(1\)&gt; ligar amanhã/);
     assert.doesNotMatch(detail, /<img src=x/);
     assert.match(detail, /Aprovado para teste/);
+    assert.match(detail, /Brasil \(BR\)/);
 
     const invalid = await c.form(detailPath, { _csrf: csrf, status: "hacked", notes: "" });
     assert.equal(invalid.status, 422);
@@ -447,15 +539,14 @@ describe("painel administrativo", () => {
     const { base } = await start();
     const payload = await fullPayload(base);
     await postLead(base, payload);
-    const [[lead]] = await rootConn.query("SELECT public_id FROM leads WHERE submission_key = ?", [payload.submission_key]);
+    const lead = await leadRow(payload.submission_key);
     const { c } = await login(base);
     const path = `/admin/leads/${lead.public_id}/delete`;
     const csrf = await csrfFrom(c, path);
     assert.equal((await c.form(path, { _csrf: csrf })).status, 422);
     const del = await c.form(path, { _csrf: csrf, confirm: "yes" });
     assert.equal(del.status, 303);
-    const [rows] = await rootConn.query("SELECT id FROM leads WHERE public_id = ?", [lead.public_id]);
-    assert.equal(rows.length, 0);
+    assert.equal(await leadRow(payload.submission_key), undefined);
   });
 
   test("logout encerra a sessão", async () => {
@@ -483,11 +574,12 @@ describe("painel administrativo", () => {
     assert.equal((await abs.c.request("/admin/leads")).status, 302);
   });
 
-  test("redefinição de senha encerra sessões abertas", async () => {
+  test("redefinição de senha pela linha de comando encerra sessões abertas", async () => {
     const { base } = await start();
     const { c } = await login(base);
     assert.equal((await c.request("/admin/leads")).status, 200);
-    await resetPassword(pool, ADMIN_EMAIL, ADMIN_PASSWORD);
+    const reset = await phpCli(["admin:reset-password", ADMIN_EMAIL], { env: baseEnv(), input: `${ADMIN_PASSWORD}\n` });
+    assert.equal(reset.status, 0, reset.stderr);
     assert.equal((await c.request("/admin/leads")).status, 302);
     assert.equal((await login(base)).res.status, 303);
   });

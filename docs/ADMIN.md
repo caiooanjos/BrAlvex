@@ -1,56 +1,56 @@
 # Painel administrativo (`/admin/leads`)
 
-O painel não tem cadastro público nem senha padrão. Contas são gerenciadas apenas por linha de comando, no servidor, por quem tem acesso às variáveis de ambiente.
+O painel não tem cadastro público nem senha padrão. As contas são definidas por quem tem acesso aos arquivos do servidor.
 
-## Criar o primeiro administrador
+## Primeiro administrador e troca de senha (sem terminal)
 
-```bash
-npm run admin:create -- pessoa@bralvex.com
-```
+O `npm run hostinger` grava em `bralvex-app/config.php` o e-mail do administrador inicial e o *hash* da senha (`ADMIN_SEED_EMAIL` e `ADMIN_SEED_PASSWORD_HASH`). No primeiro acesso ao site com essa configuração:
 
-A senha (mínimo de 12 caracteres) é digitada sem eco e confirmada. Ela não aparece no histórico do shell. Em automação sem terminal, a senha é lida da primeira linha da entrada padrão:
+- se o e-mail ainda não existe, a conta é criada;
+- se já existe, a senha é redefinida e todas as sessões abertas daquela conta são encerradas.
 
-```bash
-printf '%s\n' "$SENHA_GERADA" | npm run admin:create -- pessoa@bralvex.com
-```
+Isso acontece **uma única vez por senha**. Para trocar a senha ou recuperar o acesso, gere o pacote de novo com a nova senha e substitua apenas o `config.php`. A senha nunca fica gravada em texto puro: só o *hash* (bcrypt, atualizado automaticamente para Argon2id no primeiro login quando o PHP do servidor oferece).
 
-As senhas são armazenadas com hash Argon2id (`@node-rs/argon2`), nunca em texto puro.
+## Linha de comando (SSH ou computador com acesso ao banco)
 
-## Redefinir senha
-
-Procedimento seguro, sem envio de link por e-mail (ainda não há serviço de envio configurado):
-
-1. A pessoa solicita a redefinição a outra pessoa responsável, por um canal já verificado.
-2. Quem tem acesso ao servidor executa:
-   ```bash
-   npm run admin:reset-password -- pessoa@bralvex.com
-   ```
-3. A nova senha é entregue por canal seguro (ex.: gerenciador de senhas compartilhado), e a pessoa a troca na sequência pelo mesmo comando.
-
-A redefinição encerra imediatamente todas as sessões abertas daquela conta.
-
-## Desativar uma conta
+Na pasta `bralvex-app`:
 
 ```bash
-npm run admin:deactivate -- pessoa@bralvex.com
+php cli.php admin:create pessoa@bralvex.com          # cria outro administrador
+php cli.php admin:reset-password pessoa@bralvex.com  # nova senha e encerra as sessões dela
+php cli.php admin:deactivate pessoa@bralvex.com      # desativa a conta e encerra as sessões
+php cli.php migrate                                  # aplica migrations pendentes (normalmente automático)
+php cli.php retention [--apply]                      # aplica LEAD_RETENTION_DAYS (sem --apply, só simula)
 ```
+
+A senha é digitada sem eco (mínimo de 12 caracteres) e nunca passada como argumento. A redefinição deve ser pedida por um canal já verificado, e a nova senha entregue por canal seguro, como um gerenciador de senhas compartilhado.
 
 ## Sessões e proteções
 
-- Cookie `HttpOnly`, `SameSite=Strict`, restrito a `/admin` e `Secure` em produção (`__Secure-bralvex_admin`).
-- A sessão expira após 30 minutos sem uso (`SESSION_IDLE_MINUTES`) e, em qualquer caso, após 8 horas (`SESSION_ABSOLUTE_HOURS`).
-- As sessões ficam no MySQL, e a tabela guarda apenas o hash SHA-256 do identificador.
-- O login tem limite por IP (`LOGIN_RATE_*`) e por e-mail (5 falhas em 15 minutos), e mostra a mesma mensagem para e-mail inexistente ou senha errada.
-- Toda ação de escrita exige token CSRF e origem própria. Todas as rotas, inclusive a exportação CSV, verificam a sessão no servidor.
-- Ficam registradas em `admin_audit_log`: login, logout, visualização, alteração (somente os nomes dos campos alterados), exportação (número de linhas) e exclusão. As respostas do formulário não são copiadas para o log.
-- O painel responde com `X-Robots-Tag: noindex` e fica fora do sitemap. Isso não substitui a autenticação.
+- **Cookie:** `HttpOnly`, `SameSite=Strict` e restrito a `/admin`. Em produção, também `Secure`, com o prefixo `__Secure-`.
+- **Expiração:** após 30 minutos sem uso (`SESSION_IDLE_MINUTES`) e, em qualquer caso, após 8 horas (`SESSION_ABSOLUTE_HOURS`).
+- **Armazenamento:** as sessões ficam no MySQL, e a tabela guarda apenas o SHA-256 do identificador. Cada login gera um identificador novo.
+- **Login:**
+  - limite por IP (`LOGIN_RATE_*`) e por e-mail (5 falhas em 15 minutos);
+  - a mesma mensagem para e-mail inexistente ou senha errada.
+
+  Os contadores guardam só um HMAC do IP ou do e-mail, nunca o valor original.
+- **Escrita:** toda ação de escrita exige token CSRF e origem própria.
+- **Verificação no servidor:** todas as rotas, inclusive a exportação CSV, verificam a sessão.
+- **Auditoria (`admin_audit_log`):** ficam registrados:
+  - login e logout;
+  - visualização de uma solicitação;
+  - alteração (somente os nomes dos campos alterados);
+  - exportação (número de linhas);
+  - exclusão;
+  - criação ou redefinição de contas.
+
+  As respostas do formulário não são copiadas para o registro.
+- **Indexação:** o painel responde com `X-Robots-Tag: noindex` e fica fora do sitemap. Isso não substitui a autenticação.
 
 ## MFA (autenticação multifator)
 
-Não foi implementado um MFA próprio. Opções consolidadas, em ordem de menor esforço:
-
-1. **Cloudflare Access (Zero Trust)** na frente de `/admin/*`, com MFA do provedor de identidade (Google Workspace, Microsoft etc.). Não exige mudança de código, mas requer que o domínio esteja numa conta Cloudflare controlada pela BrAlveX.
-2. Migrar a autenticação para uma biblioteca com TOTP/WebAuthn mantida pela comunidade (ex.: Better Auth com o plugin `twoFactor`), reaproveitando o MySQL.
+Não há MFA próprio. Opção consolidada, sem mudança de código: **Cloudflare Access (Zero Trust)** na frente de `/admin/*`, com o MFA do provedor de identidade (Google Workspace, Microsoft etc.). Exige que o domínio esteja numa conta Cloudflare controlada pela BrAlveX.
 
 ## Exportação CSV
 

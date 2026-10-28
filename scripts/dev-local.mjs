@@ -1,21 +1,14 @@
-// Ambiente local completo, sem instalar MySQL: banco temporário (apagado ao encerrar), site, formulário e painel.
+// Ambiente local completo, sem instalar nada além do Node: banco MySQL temporário (apagado ao encerrar),
+// PHP portátil (baixado na primeira vez, no Windows) e o mesmo back end que roda na Hostinger.
 // Uso: npm run dev  →  http://localhost:3000  (Ctrl+C para encerrar)
 import { randomBytes } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { connect } from "node:net";
+import { join } from "node:path";
 import mysql from "mysql2/promise";
 import { createDB } from "mysql-memory-server";
 import { build } from "../site/build.mjs";
-import { createApp } from "../server/app.js";
-import { createAdmin } from "../server/cli/admin.js";
-import { loadConfig } from "../server/config.js";
-import { createPool } from "../server/db.js";
-import { log } from "../server/log.js";
-import { migrate } from "../server/migrate.js";
-
-if (process.env.NODE_ENV === "production") {
-  console.error("npm run dev é só para desenvolvimento e não roda com NODE_ENV=production.");
-  process.exit(1);
-}
+import { phpCli, ROOT, startPhpServer } from "./php.mjs";
 
 const port = Number(process.env.PORT || 3000);
 const secret = () => randomBytes(36).toString("base64url");
@@ -33,49 +26,54 @@ if (portBusy) {
 await build({ quiet: true });
 console.log("Iniciando MySQL temporário (na primeira vez o download leva cerca de 1 minuto)...");
 const db = await createDB({ dbName: "bralvex", logLevel: "ERROR" });
-const root = { host: "127.0.0.1", port: db.port, user: db.username, password: "", database: "bralvex" };
-await migrate(root, { log: () => {} });
 
 const appPassword = secret();
-const conn = await mysql.createConnection(root);
-await conn.query("CREATE USER 'bralvex_app'@'%' IDENTIFIED BY ?", [appPassword]);
-await conn.query("GRANT SELECT, INSERT, UPDATE, DELETE ON bralvex.* TO 'bralvex_app'@'%'");
-await conn.end();
-
-const config = loadConfig({
-  NODE_ENV: "development",
+const storage = join(ROOT, ".cache", "dev-storage");
+mkdirSync(storage, { recursive: true });
+const env = {
+  APP_ENV: "development",
   SITE_URL: `http://localhost:${port}`,
-  PORT: String(port),
+  DB_HOST: "127.0.0.1",
   DB_PORT: String(db.port),
+  DB_NAME: "bralvex",
   DB_USER: "bralvex_app",
   DB_PASSWORD: appPassword,
-  DB_NAME: "bralvex",
   SESSION_SECRET: secret(),
   FORM_TOKEN_SECRET: secret(),
-});
-const pool = createPool(config.db);
-const adminEmail = "admin@localhost.test";
-const adminPassword = secret().slice(0, 20);
-await createAdmin(pool, adminEmail, adminPassword);
+  AUTO_MIGRATE: "false",
+  STORAGE_DIR: storage,
+};
 
-const server = createApp({ config, pool, log }).listen(port, "127.0.0.1", () => {
+async function stop(code = 0) {
+  server?.stop();
+  await db.stop().catch(() => {});
+  process.exit(code);
+}
+process.on("SIGINT", () => stop());
+process.on("SIGTERM", () => stop());
+
+let server;
+try {
+  const migrated = await phpCli(["migrate"], { env: { ...env, DB_MIGRATION_USER: db.username, DB_MIGRATION_PASSWORD: "" } });
+  if (migrated.status !== 0) throw new Error(migrated.stderr || migrated.stdout);
+  const conn = await mysql.createConnection({ host: "127.0.0.1", port: db.port, user: db.username, database: "bralvex" });
+  await conn.query("CREATE USER 'bralvex_app'@'%' IDENTIFIED BY ?", [appPassword]);
+  await conn.query("GRANT SELECT, INSERT, UPDATE, DELETE ON bralvex.* TO 'bralvex_app'@'%'");
+  await conn.end();
+
+  const adminEmail = "admin@localhost.test";
+  const adminPassword = secret().slice(0, 20);
+  const created = await phpCli(["admin:create", adminEmail], { env, input: `${adminPassword}\n` });
+  if (created.status !== 0) throw new Error(created.stderr || created.stdout);
+
+  server = await startPhpServer(env, { port, inherit: false });
+  server.child.on("exit", () => stop(1));
   console.log(`
 Site:   http://localhost:${port}/pt/
 Painel: http://localhost:${port}/admin/leads
 Login temporário: ${adminEmail} / ${adminPassword}
 Os dados somem ao encerrar (Ctrl+C).`);
-});
-server.on("error", async (err) => {
-  console.error(`Não foi possível abrir a porta ${port}: ${err.code || err.message}`);
-  await db.stop().catch(() => {});
-  process.exit(1);
-});
-
-async function stop() {
-  server.close();
-  await pool.end().catch(() => {});
-  await db.stop().catch(() => {});
-  process.exit(0);
+} catch (err) {
+  console.error(`Não foi possível iniciar o ambiente local: ${err.message}`);
+  await stop(1);
 }
-process.on("SIGINT", stop);
-process.on("SIGTERM", stop);

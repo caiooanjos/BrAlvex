@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { cleanAttribution, validateLead } from "../shared/form-schema.js";
-import { csvCell, toCsv } from "../server/csv.js";
-import { html } from "../server/html.js";
-import { createFormTokens } from "../server/security.js";
 import { validLead } from "./helpers.js";
 
 
@@ -72,31 +69,4 @@ test("atribuição descarta UTMs inválidas e mantém só o domínio de origem",
     { s: "google", m: null, c: null, r: "example.com" },
   );
   assert.equal(cleanAttribution({ referrer_host: "https://a.com/?email=x" }).referrer_host, null);
-});
-
-test("CSV neutraliza fórmulas e escapa aspas", () => {
-  assert.equal(csvCell("=HYPERLINK(\"x\")"), "\"'=HYPERLINK(\"\"x\"\")\"");
-  assert.equal(csvCell("+5511912345678"), "\"'+5511912345678\"");
-  assert.equal(csvCell("  @SUM(A1)"), "\"'  @SUM(A1)\"");
-  assert.equal(csvCell("normal"), '"normal"');
-  assert.equal(csvCell(null), "");
-  assert.ok(toCsv(["a"], [["-1"]]).startsWith("﻿"));
-});
-
-test("template HTML escapa valores interpolados", () => {
-  const out = html`<p>${'<script>alert("x")</script>'}</p>`.toString();
-  assert.equal(out, "<p>&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;</p>");
-});
-
-test("token do formulário: assinatura, tempo mínimo e expiração", () => {
-  const tokens = createFormTokens("s".repeat(40), { minSeconds: 3, maxHours: 1 });
-  const now = Date.now();
-  const token = tokens.issue(now);
-  assert.equal(tokens.verify(token, now + 1000), "too_fast");
-  assert.equal(tokens.verify(token, now + 5000), "ok");
-  assert.equal(tokens.verify(token, now + 2 * 3600 * 1000), "expired");
-  assert.equal(tokens.verify(token.replace(/.$/, (c) => (c === "A" ? "B" : "A")), now + 5000), "invalid");
-  assert.equal(tokens.verify(undefined), "invalid");
-  const other = createFormTokens("o".repeat(40), { minSeconds: 0, maxHours: 1 });
-  assert.equal(other.verify(token, now + 5000), "invalid");
 });

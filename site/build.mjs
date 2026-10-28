@@ -5,12 +5,16 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pt from "./content/pt.js";
 import en from "./content/en.js";
-import { renderHome, renderPrivacy, renderTrial, renderTrialReceived, rootRedirect } from "./templates.js";
+import { renderHome, renderNoJsErrors, renderNotFound, renderPrivacy, renderTrial, renderTrialReceived, rootRedirect } from "./templates.js";
+import * as schema from "../shared/form-schema.js";
 
 const PRIVACY_UPDATED = { pt: "28/10/2026", en: "October 28, 2026" };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = join(root, "dist");
+// Dados gerados para o back end PHP (mesma fonte dos textos e da validação do site).
+const generated = join(root, "php", "app", "generated");
+export const NOJS_MESSAGES_PLACEHOLDER = "@@MESSAGES@@";
 const siteUrl = (process.env.SITE_URL || "https://bralvex.com").replace(/\/+$/, "");
 const langs = [pt, en];
 
@@ -40,6 +44,8 @@ export async function build({ quiet = false } = {}) {
     await write(c.routes.privacy, renderPrivacy(c, langs, siteUrl, PRIVACY_UPDATED[c.lang]));
   }
   await write("/", rootRedirect(pt.routes.home));
+  await writeFile(join(dist, "404.html"), renderNotFound(), "utf8");
+  await writeGenerated();
 
   const urls = ["home", "trial", "privacy"].flatMap((key) =>
     langs.map((c) => {
@@ -56,9 +62,33 @@ export async function build({ quiet = false } = {}) {
   );
   await writeFile(join(dist, "robots.txt"), `User-agent: *\nDisallow: /api/\n\nSitemap: ${siteUrl}/sitemap.xml\n`);
 
-  if (!quiet) {
-    console.log(`Site gerado em dist/ (base ${siteUrl}).`);
-    console.warn("Aviso: a Política de Privacidade contém itens [PENDENTE]/[PENDING] que precisam de revisão antes da produção.");
+  if (!quiet) console.log(`Site gerado em dist/ (base ${siteUrl}).`);
+}
+
+async function writeGenerated() {
+  await rm(generated, { recursive: true, force: true });
+  await mkdir(generated, { recursive: true });
+  const { FORM_VERSION, PRIVACY_NOTICE_VERSION, MARKETING_TEXT_VERSION, OPTIONS, COUNTRIES, LIMITS, UTM_FIELDS } = schema;
+  const json = (name, data) => writeFile(join(generated, name), JSON.stringify(data, null, 1), "utf8");
+  await json("schema.json", { FORM_VERSION, PRIVACY_NOTICE_VERSION, MARKETING_TEXT_VERSION, OPTIONS, COUNTRIES, LIMITS, UTM_FIELDS });
+  const countryNames = new Intl.DisplayNames(["pt-BR"], { type: "region" });
+  await json("content.json", {
+    countries_pt: Object.fromEntries(COUNTRIES.map((code) => [code, countryNames.of(code)])),
+    ...Object.fromEntries(
+      langs.map((c) => [
+        c.lang,
+        {
+          routes: c.routes,
+          fields: c.trial.fields,
+          errors: c.trial.errors,
+          failure: c.trial.failure,
+          options: c.trial.options,
+        },
+      ]),
+    ),
+  });
+  for (const c of langs) {
+    await writeFile(join(generated, `nojs-${c.lang}.html`), renderNoJsErrors(c, langs, siteUrl, [NOJS_MESSAGES_PLACEHOLDER]), "utf8");
   }
 }
 
