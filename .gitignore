@@ -1,4 +1,30 @@
+# Dependências e saídas de build (recriadas por npm install / npm run build)
 node_modules/
 dist/
-.DS_Store
+php/app/generated/
+
+# Caches e runtimes locais (PHP portátil, dados do npm run dev)
+.cache/
+
+# Configuração privada, logs e pacotes de publicação (contêm senhas)
+php/app/config.php
+php/app/storage/
+storage/
+deploy/
+bralvex-app/
+public_html/
+public_html.zip
+bralvex-app.zip
+.env
+.env.*
 *.log
+
+# Backups de banco
+backups/
+*.sql
+*.sql.gz
+!migrations/*.sql
+!docs/database-setup.sql
+
+.DS_Store
+Thumbs.db
