@@ -1,0 +1,2 @@
+# Código e configuração privados: nunca servidos pela web, mesmo se esta pasta for parar dentro de public_html.
+Require all denied

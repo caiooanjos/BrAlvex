@@ -2,3 +2,13 @@ node_modules/
 dist/
 .DS_Store
 *.log
+.env
+.env.*
+!.env.example
+*.sql.gz
+backups/
+.cache/
+deploy/
+php/app/generated/
+php/app/storage/
+php/app/config.php
